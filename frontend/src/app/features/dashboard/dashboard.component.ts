@@ -8,8 +8,10 @@ import {
 } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { Router } from "@angular/router";
+import { Subscription } from "rxjs";
 import { AuthService } from "../../core/services/auth.service";
 import { SessionService } from "../../core/services/session.service";
+import { FinanceStoreService } from "../../core/services/finance-store.service";
 import { DashboardService } from "./services/dashboard.service";
 import {
   DashboardData,
@@ -31,12 +33,13 @@ const MONTH_NAMES_ES = [
 export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   private authService = inject(AuthService);
   private sessionService = inject(SessionService);
+  private store = inject(FinanceStoreService);
   private dashboardService = inject(DashboardService);
   private router = inject(Router);
   private ngZone = inject(NgZone);
 
-  currentYear = new Date().getFullYear();
-  currentMonth = new Date().getMonth() + 1;
+  currentYear = this.store.year();
+  currentMonth = this.store.month();
 
   dashboardData: DashboardData | null = null;
   loading = true;
@@ -44,6 +47,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   mobileMenuOpen = false;
 
   private animFrameId = 0;
+  private storeSub: Subscription | null = null;
 
   get user() {
     return this.authService.currentUser();
@@ -71,7 +75,14 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnInit(): void {
     this.sessionService.start();
-    this.loadDashboard();
+
+    // El selector de mes/año es compartido con Activos y Resumen: cualquier
+    // cambio o registro se refleja aquí de inmediato.
+    this.storeSub = this.store.refresh$.subscribe(() => {
+      this.currentYear = this.store.year();
+      this.currentMonth = this.store.month();
+      this.loadDashboard();
+    });
   }
 
   ngAfterViewInit(): void {
@@ -79,6 +90,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.storeSub?.unsubscribe();
     if (this.animFrameId) {
       cancelAnimationFrame(this.animFrameId);
     }
@@ -102,21 +114,26 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   previousMonth(): void {
-    this.currentMonth--;
-    if (this.currentMonth < 1) {
-      this.currentMonth = 12;
-      this.currentYear--;
-    }
-    this.loadDashboard();
+    this.moveMonth(-1);
   }
 
   nextMonth(): void {
-    this.currentMonth++;
-    if (this.currentMonth > 12) {
-      this.currentMonth = 1;
-      this.currentYear++;
+    this.moveMonth(1);
+  }
+
+  private moveMonth(delta: number): void {
+    let month = this.currentMonth + delta;
+    let year = this.currentYear;
+    if (month < 1) {
+      month = 12;
+      year--;
+    } else if (month > 12) {
+      month = 1;
+      year++;
     }
-    this.loadDashboard();
+    this.currentMonth = month;
+    this.currentYear = year;
+    this.store.setYearMonth(year, month);
   }
 
   barHeight(value: number): number {
@@ -140,13 +157,13 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   formatCurrencyShort(value: number): string {
     if (value >= 1000) {
-      return `$${(value / 1000).toFixed(0)}k`;
+      return `Q${(value / 1000).toFixed(0)}k`;
     }
-    return `$${value.toFixed(0)}`;
+    return `Q${value.toFixed(0)}`;
   }
 
   formatCurrencyNegative(value: number): string {
-    return `-$${Math.abs(value).toLocaleString("en-US", {
+    return `-Q${Math.abs(value).toLocaleString("en-US", {
       minimumFractionDigits: 2,
     })}`;
   }
