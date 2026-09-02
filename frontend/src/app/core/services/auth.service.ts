@@ -37,18 +37,22 @@ export class AuthService {
       .post<LoginResponse>(`${API_URL}/auth/login`, { email, password })
       .pipe(
         tap((response) => {
-          const expiry = this.decodeExpiry(response.token);
-
-          localStorage.setItem(TOKEN_KEY, response.token);
-          localStorage.setItem(USER_KEY, JSON.stringify(response.user));
-          if (expiry) {
-            localStorage.setItem(EXPIRY_KEY, String(expiry));
-          }
-
-          this.currentUser.set(response.user);
-          this.tokenExpiryMs.set(expiry);
+          this.persistSession(response);
         })
       );
+  }
+
+  /**
+   * Renueva el JWT mientras el usuario sigue interactuando. Así la sesión
+   * expira por inactividad y no desde el momento del login: si el usuario
+   * sigue activo, el token siempre se mantiene vigente.
+   */
+  refreshToken(): Observable<LoginResponse> {
+    return this.http.post<LoginResponse>(`${API_URL}/auth/refresh`, {}).pipe(
+      tap((response) => {
+        this.persistSession(response);
+      })
+    );
   }
 
   register(name: string, email: string, password: string): Observable<RegisterResponse> {
@@ -57,6 +61,21 @@ export class AuthService {
       email,
       password,
     });
+  }
+
+  private persistSession(response: LoginResponse): void {
+    const expiry = this.decodeExpiry(response.token);
+
+    localStorage.setItem(TOKEN_KEY, response.token);
+    localStorage.setItem(USER_KEY, JSON.stringify(response.user));
+    if (expiry) {
+      localStorage.setItem(EXPIRY_KEY, String(expiry));
+    } else {
+      localStorage.removeItem(EXPIRY_KEY);
+    }
+
+    this.currentUser.set(response.user);
+    this.tokenExpiryMs.set(expiry);
   }
 
   logout(): void {
@@ -72,7 +91,9 @@ export class AuthService {
   }
 
   isAuthenticated(): boolean {
-    return !!this.getToken() && !this.isTokenExpired();
+    // Solo se considera sesión válida un token con expiración conocida y vigente.
+    // Un token sin `exp` (o expirado) no puede saltarse el login.
+    return !!this.getToken() && this.tokenExpiryMs() !== null && !this.isTokenExpired();
   }
 
   isTokenExpired(): boolean {
