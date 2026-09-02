@@ -9,7 +9,7 @@
 
       <nav class="dash-nav">
         <a class="nav-link active">Inicio</a>
-        <a class="nav-link" (click)="navigateTo('proximamente')">Activos</a>
+        <a class="nav-link" (click)="navigateTo('activos')">Activos</a>
         <a class="nav-link" (click)="navigateTo('proximamente')">Pasivos</a>
         <a class="nav-link" (click)="navigateTo('proximamente')">Pendientes</a>
         <a class="nav-link" (click)="navigateTo('proximamente')">Suscripciones</a>
@@ -17,13 +17,9 @@
       </nav>
 
       <div class="dash-actions">
-        <button class="btn-add-income" (click)="navigateTo('proximamente')">
+        <button class="btn-add-income" (click)="navigateTo('activos')">
           <span class="icon-sm">+</span>
           Ingresos
-        </button>
-        <button class="btn-logout-desktop" (click)="logout()">
-          <span class="icon-sm">&rarr;</span>
-          Salir
         </button>
         <button class="btn-mobile-menu" (click)="mobileMenuOpen = !mobileMenuOpen">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -129,7 +125,7 @@
       <div class="chart-panel">
         <div class="chart-header">
           <h2 class="section-title">Ingresos vs Gastos</h2>
-          <button class="link-btn" (click)="navigateTo('proximamente')">
+          <button class="link-btn" (click)="navigateTo('resumen')">
             Reporte Completo
             <span class="icon-xs">&rarr;</span>
           </button>
