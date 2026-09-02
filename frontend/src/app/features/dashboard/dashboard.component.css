@@ -417,6 +417,12 @@
 }
 .grid-line.last { opacity: 1; }
 
+.chart-bars-container {
+  position: relative;
+  width: 100%;
+  align-self: stretch;
+}
+
 .chart-bars {
   position: relative;
   z-index: 1;
