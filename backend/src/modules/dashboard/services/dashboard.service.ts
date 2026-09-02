@@ -5,6 +5,11 @@ const MONTH_NAMES = [
   "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
 ];
 
+const FULL_MONTH_NAMES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
 export class DashboardService {
   async getDashboard(userId: number, year: number, month: number) {
     const [summary, chart, pending, subscriptions] = await Promise.all([
@@ -15,6 +20,40 @@ export class DashboardService {
     ]);
 
     return { summary, chart, pending, subscriptions };
+  }
+
+  async getResumen(userId: number, year: number, month: number) {
+    const years = [];
+    const startYear = year - 2;
+    const endYear = year + 1;
+
+    for (let y = startYear; y <= endYear; y++) {
+      const months = [];
+
+      for (let m = 1; m <= 12; m++) {
+        const ingresos = await this.getMonthTotal(userId, y, m, "INGRESO");
+        const gastos = await this.getMonthTotal(userId, y, m, "GASTO");
+
+        months.push({
+          monthNum: m,
+          mes: FULL_MONTH_NAMES[m - 1],
+          mesCorto: MONTH_NAMES[m - 1],
+          ingresos,
+          gastos,
+          balance: ingresos - gastos,
+        });
+      }
+
+      years.push({
+        year: y,
+        meses: months,
+        totalIngresos: months.reduce((acc, m) => acc + m.ingresos, 0),
+        totalGastos: months.reduce((acc, m) => acc + m.gastos, 0),
+        balance: months.reduce((acc, m) => acc + m.balance, 0),
+      });
+    }
+
+    return { selectedYear: year, selectedMonth: month, years };
   }
 
   private async getSummary(userId: number, year: number, month: number) {
@@ -35,8 +74,8 @@ export class DashboardService {
 
     const monthIngresosResult = await pool.query(
       `SELECT COALESCE(SUM(monto), 0)::numeric AS total
-       FROM movimientos
-       WHERE user_id = $1 AND tipo = 'INGRESO'
+       FROM activos
+       WHERE user_id = $1
          AND fecha >= $2 AND fecha <= $3`,
       [userId, monthStart, monthEnd]
     );
@@ -56,8 +95,8 @@ export class DashboardService {
 
     const prevIngresosResult = await pool.query(
       `SELECT COALESCE(SUM(monto), 0)::numeric AS total
-       FROM movimientos
-       WHERE user_id = $1 AND tipo = 'INGRESO'
+       FROM activos
+       WHERE user_id = $1
          AND fecha >= $2 AND fecha <= $3`,
       [userId, prevMonthStart, prevMonthEnd]
     );
@@ -104,35 +143,52 @@ export class DashboardService {
       let y = year;
       while (m <= 0) { m += 12; y--; }
 
-      const monthStart = new Date(y, m - 1, 1);
-      const monthEnd = new Date(y, m, 0);
-
-      const ingresosResult = await pool.query(
-        `SELECT COALESCE(SUM(monto), 0)::numeric AS total
-         FROM movimientos
-         WHERE user_id = $1 AND tipo = 'INGRESO'
-           AND fecha >= $2 AND fecha <= $3`,
-        [userId, monthStart, monthEnd]
-      );
-
-      const gastosResult = await pool.query(
-        `SELECT COALESCE(SUM(monto), 0)::numeric AS total
-         FROM movimientos
-         WHERE user_id = $1 AND tipo = 'GASTO'
-           AND fecha >= $2 AND fecha <= $3`,
-        [userId, monthStart, monthEnd]
-      );
+      const ingresos = await this.getMonthTotal(userId, y, m, "INGRESO");
+      const gastos = await this.getMonthTotal(userId, y, m, "GASTO");
 
       points.push({
         month: MONTH_NAMES[m - 1],
         year: y,
         monthNum: m,
-        ingresos: Number(ingresosResult.rows[0].total),
-        gastos: Number(gastosResult.rows[0].total),
+        ingresos,
+        gastos,
       });
     }
 
     return points;
+  }
+
+  /**
+   * Los ingresos se toman de la tabla `activos` (donde se registran los
+   * ingresos del usuario) y los gastos de `movimientos` con tipo GASTO.
+   */
+  private async getMonthTotal(
+    userId: number,
+    year: number,
+    month: number,
+    kind: "INGRESO" | "GASTO"
+  ): Promise<number> {
+    const monthStart = new Date(year, month - 1, 1);
+    const monthEnd = new Date(year, month, 0);
+
+    if (kind === "INGRESO") {
+      const result = await pool.query(
+        `SELECT COALESCE(SUM(monto), 0)::numeric AS total
+         FROM activos
+         WHERE user_id = $1 AND fecha >= $2 AND fecha <= $3`,
+        [userId, monthStart, monthEnd]
+      );
+      return Number(result.rows[0].total);
+    }
+
+    const result = await pool.query(
+      `SELECT COALESCE(SUM(monto), 0)::numeric AS total
+       FROM movimientos
+       WHERE user_id = $1 AND tipo = 'GASTO'
+         AND fecha >= $2 AND fecha <= $3`,
+      [userId, monthStart, monthEnd]
+    );
+    return Number(result.rows[0].total);
   }
 
   private async getPending(userId: number) {
