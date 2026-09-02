@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS activos (
     nombre         VARCHAR(200) NOT NULL,
     monto          NUMERIC(12,2) NOT NULL CHECK (monto >= 0),
     categoria      VARCHAR(100) NOT NULL DEFAULT 'General',
+    empresa        VARCHAR(200),
     descripcion    TEXT,
     fecha          DATE         NOT NULL DEFAULT CURRENT_DATE,
     created_at     TIMESTAMP    NOT NULL DEFAULT NOW()
@@ -33,6 +34,9 @@ CREATE TABLE IF NOT EXISTS activos (
 
 CREATE INDEX IF NOT EXISTS activos_user_id_idx ON activos (user_id);
 CREATE INDEX IF NOT EXISTS activos_user_fecha_idx ON activos (user_id, fecha);
+
+-- Permite agregar la columna empresa a bases de datos ya existentes
+ALTER TABLE activos ADD COLUMN IF NOT EXISTS empresa VARCHAR(200);
 
 -- =========================================================
 -- PASIVOS (deudas / créditos)

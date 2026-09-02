@@ -2,6 +2,7 @@ import express, { Application } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import authRoutes from "./modules/auth/routes/auth.routes";
+import activosRoutes from "./modules/activos/routes/activos.routes";
 import dashboardRoutes from "./modules/dashboard/routes/dashboard.routes";
 
 dotenv.config();
@@ -20,6 +21,7 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/auth", authRoutes);
+app.use("/api/activos", activosRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 
 app.use((_req, res) => {

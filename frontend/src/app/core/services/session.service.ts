@@ -3,8 +3,13 @@ import { Router } from "@angular/router";
 import { AuthService } from "./auth.service";
 import { ToastService } from "./toast.service";
 
-const IDLE_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutos de inactividad
+// TEMPORAL PARA PRUEBAS: 2 minutos de inactividad (antes 20). volver a 20 min.
+const IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 const CHECK_INTERVAL_MS = 15 * 1000;
+// Renueva el token si le faltan menos de 5 minutos para expirar.
+const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000;
+// Evita llamadas de refresh en cadena: mínimo 1 minuto entre cada una.
+const MIN_REFRESH_INTERVAL_MS = 60 * 1000;
 const ACTIVITY_EVENTS = ["mousemove", "keydown", "click", "scroll", "touchstart"];
 
 @Injectable({ providedIn: "root" })
@@ -17,7 +22,11 @@ export class SessionService {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private expiryCheckInterval: ReturnType<typeof setInterval> | null = null;
   private listening = false;
-  private resetHandler = () => this.restartIdleTimer();
+  private lastRefreshAt = 0;
+  private resetHandler = () => {
+    this.restartIdleTimer();
+    this.checkTokenRefresh();
+  };
 
   /** Debe llamarse una vez que el usuario tiene una sesión activa. */
   start(): void {
@@ -91,6 +100,40 @@ export class SessionService {
   private checkExpiry(): void {
     if (this.authService.isTokenExpired()) {
       this.expireSession("token");
+      return;
+    }
+
+    this.checkTokenRefresh();
+  }
+
+  /**
+   * Sesión deslizante: mientras el usuario interactúa, el token se renueva
+   * antes de expirar. El conteo de expiración inicia en la inactividad, no
+   * en el momento del login.
+   */
+  private checkTokenRefresh(): void {
+    if (!this.authService.getToken()) {
+      return;
+    }
+
+    const expiry = this.authService.getTokenExpiryMs();
+    if (expiry === null) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - this.lastRefreshAt < MIN_REFRESH_INTERVAL_MS) {
+      return;
+    }
+
+    if (expiry - now <= REFRESH_BEFORE_EXPIRY_MS) {
+      this.lastRefreshAt = now;
+      this.authService.refreshToken().subscribe({
+        error: () => {
+          // El interceptor maneja los 401; aquí solo dejamos de intentar.
+          this.lastRefreshAt = 0;
+        },
+      });
     }
   }
 }

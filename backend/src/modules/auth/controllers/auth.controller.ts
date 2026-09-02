@@ -33,6 +33,15 @@ export class AuthController {
       handleError(error, res);
     }
   }
+
+  async refresh(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { token, user } = await authService.refresh(req.userId as number);
+      res.status(200).json({ token, user });
+    } catch (error) {
+      handleError(error, res);
+    }
+  }
 }
 
 function handleError(error: unknown, res: Response): void {

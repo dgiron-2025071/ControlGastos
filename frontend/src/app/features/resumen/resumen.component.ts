@@ -1,22 +1,14 @@
-import {
-  Component,
-  OnInit,
-  OnDestroy,
-  AfterViewInit,
-  inject,
-  NgZone,
-} from "@angular/core";
+import { Component, OnInit, OnDestroy, AfterViewInit, inject, NgZone, signal, computed } from "@angular/core";
 import { CommonModule } from "@angular/common";
+import { FormsModule } from "@angular/forms";
 import { Router } from "@angular/router";
 import { Subscription } from "rxjs";
 import { AuthService } from "../../core/services/auth.service";
 import { SessionService } from "../../core/services/session.service";
+import { ToastService } from "../../core/services/toast.service";
 import { FinanceStoreService } from "../../core/services/finance-store.service";
-import { DashboardService } from "./services/dashboard.service";
-import {
-  DashboardData,
-  ChartDataPoint,
-} from "./models/dashboard.model";
+import { ResumenService } from "./services/resumen.service";
+import { ResumenData, ResumenMonth } from "./models/resumen.model";
 
 const MONTH_NAMES_ES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -24,30 +16,45 @@ const MONTH_NAMES_ES = [
 ];
 
 @Component({
-  selector: "app-dashboard",
+  selector: "app-resumen",
   standalone: true,
-  imports: [CommonModule],
-  templateUrl: "./dashboard.component.html",
-  styleUrl: "./dashboard.component.css",
+  imports: [CommonModule, FormsModule],
+  templateUrl: "./resumen.component.html",
+  styleUrl: "./resumen.component.css",
 })
-export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
+export class ResumenComponent implements OnInit, AfterViewInit, OnDestroy {
   private authService = inject(AuthService);
   private sessionService = inject(SessionService);
-  private store = inject(FinanceStoreService);
-  private dashboardService = inject(DashboardService);
+  private toastService = inject(ToastService);
   private router = inject(Router);
+  private store = inject(FinanceStoreService);
+  private resumenService = inject(ResumenService);
   private ngZone = inject(NgZone);
 
   currentYear = this.store.year();
   currentMonth = this.store.month();
 
-  dashboardData: DashboardData | null = null;
-  loading = true;
-  chartMaxValue = 1;
-  mobileMenuOpen = false;
+  data = signal<ResumenData | null>(null);
+  loading = signal(true);
 
-  private animFrameId = 0;
-  private storeSub: Subscription | null = null;
+  maxValue = computed(() => {
+    const years = this.data()?.years ?? [];
+    const values = years.flatMap((y) =>
+      y.meses.flatMap((m) => [m.ingresos, m.gastos])
+    );
+    return Math.max(...values, 1);
+  });
+
+  /** Meses disponibles para el selector directo. */
+  monthOptions = [...MONTH_NAMES_ES];
+
+  /** Años disponibles para el selector directo (los que muestra la gráfica). */
+  yearOptions = computed(() => {
+    const years = this.data()?.years.map((y) => y.year) ?? [];
+    if (years.length > 0) return years;
+    const base = this.store.year();
+    return [base - 2, base - 1, base, base + 1];
+  });
 
   get user() {
     return this.authService.currentUser();
@@ -57,31 +64,19 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return `${MONTH_NAMES_ES[this.currentMonth - 1]} ${this.currentYear}`;
   }
 
-  get summary() {
-    return this.dashboardData?.summary;
-  }
-
-  get chartData(): ChartDataPoint[] {
-    return this.dashboardData?.chart ?? [];
-  }
-
-  get pendingItems() {
-    return this.dashboardData?.pending ?? [];
-  }
-
-  get subscriptionItems() {
-    return this.dashboardData?.subscriptions ?? [];
-  }
+  private dataSub: Subscription | null = null;
+  private animFrameId = 0;
 
   ngOnInit(): void {
     this.sessionService.start();
 
-    // El selector de mes/año es compartido con Activos y Resumen: cualquier
-    // cambio o registro se refleja aquí de inmediato.
-    this.storeSub = this.store.refresh$.subscribe(() => {
+    // Comparte el estado con el inicio y Activos; cualquier cambio de mes/año
+    // o de datos se refleja aquí de inmediato (usa `refresh$`, no signals
+    // directos, porque RxJS no los acepta como fuente).
+    this.dataSub = this.store.refresh$.subscribe(() => {
       this.currentYear = this.store.year();
       this.currentMonth = this.store.month();
-      this.loadDashboard();
+      this.loadResumen();
     });
   }
 
@@ -90,94 +85,78 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.storeSub?.unsubscribe();
+    this.dataSub?.unsubscribe();
     if (this.animFrameId) {
       cancelAnimationFrame(this.animFrameId);
     }
   }
 
-  loadDashboard(): void {
-    this.loading = true;
-    this.dashboardService
-      .getDashboard(this.currentYear, this.currentMonth)
-      .subscribe({
-        next: (data) => {
-          this.dashboardData = data;
-          this.computeChartMax();
-          this.loading = false;
-        },
-        error: () => {
-          this.dashboardData = null;
-          this.loading = false;
-        },
-      });
+  loadResumen(): void {
+    this.loading.set(true);
+    this.resumenService.getResumen(this.currentYear, this.currentMonth).subscribe({
+      next: (resumen) => {
+        this.data.set(resumen);
+        this.loading.set(false);
+      },
+      error: () => {
+        this.data.set(null);
+        this.loading.set(false);
+        this.toastService.error("No se pudo cargar el resumen completo.");
+      },
+    });
   }
 
-  previousMonth(): void {
-    this.moveMonth(-1);
+  /** Selector directo de mes: actualiza de inmediato la gráfica y el resumen. */
+  onMonthSelected(month: number): void {
+    this.store.setYearMonth(this.currentYear, month);
   }
 
-  nextMonth(): void {
-    this.moveMonth(1);
+  /** Selector directo de año: actualiza de inmediato la gráfica y el resumen. */
+  onYearSelected(year: number): void {
+    this.store.setYearMonth(year, this.currentMonth);
   }
 
-  private moveMonth(delta: number): void {
-    let month = this.currentMonth + delta;
-    let year = this.currentYear;
-    if (month < 1) {
-      month = 12;
-      year--;
-    } else if (month > 12) {
-      month = 1;
-      year++;
-    }
-    this.currentMonth = month;
-    this.currentYear = year;
-    this.store.setYearMonth(year, month);
+  isCurrentYear(year: number): boolean {
+    return year === this.currentYear;
+  }
+
+  isSelectedMonth(year: number, month: ResumenMonth): boolean {
+    return year === this.currentYear && month.monthNum === this.currentMonth;
+  }
+
+  yearSelected(year: number): void {
+    this.store.setYearMonth(year, this.currentMonth);
+  }
+
+  ingresosAnio(year: number): number {
+    return this.data()?.years.find((y) => y.year === year)?.totalIngresos ?? 0;
+  }
+
+  gastosAnio(year: number): number {
+    return this.data()?.years.find((y) => y.year === year)?.totalGastos ?? 0;
+  }
+
+  balanceAnio(year: number): number {
+    return this.data()?.years.find((y) => y.year === year)?.balance ?? 0;
   }
 
   barHeight(value: number): number {
-    if (this.chartMaxValue === 0) return 0;
-    return (value / this.chartMaxValue) * 100;
-  }
-
-  isCurrentMonth(point: ChartDataPoint): boolean {
-    return (
-      point.monthNum === this.currentMonth && point.year === this.currentYear
-    );
+    if (this.maxValue() === 0) return 0;
+    return (value / this.maxValue()) * 100;
   }
 
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat("es-GT", {
-      style: "currency",
-      currency: "GTQ",
+    return `Q${value.toLocaleString("en-US", {
       minimumFractionDigits: 2,
-    }).format(value);
-  }
-
-  formatCurrencyShort(value: number): string {
-    if (value >= 1000) {
-      return `Q${(value / 1000).toFixed(0)}k`;
-    }
-    return `Q${value.toFixed(0)}`;
-  }
-
-  formatCurrencyNegative(value: number): string {
-    return `-Q${Math.abs(value).toLocaleString("en-US", {
-      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     })}`;
   }
 
-  getDayLabel(dias: number): string {
-    if (dias === 0) return "Vence hoy";
-    if (dias === 1) return "Vence manana";
-    return `Vence en ${dias} dias`;
-  }
-
-  getRenewalLabel(dias: number): string {
-    if (dias === 0) return "Renueva hoy";
-    if (dias === 1) return "Manana";
-    return `En ${dias} dias`;
+  formatCurrencyCompact(value: number): string {
+    if (value >= 1000) {
+      return `Q${(value / 1000).toFixed(1)}k`;
+    }
+    return `Q${value.toFixed(0)}`;
   }
 
   navigateTo(section: string): void {
@@ -190,13 +169,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.router.navigate(["/login"], { replaceUrl: true });
   }
 
-  private computeChartMax(): void {
-    const values = this.chartData.flatMap((d) => [d.ingresos, d.gastos]);
-    this.chartMaxValue = Math.max(...values, 1);
-  }
-
+  /* Fondo: mismo shader que el inicio y activos. */
   private initShader(): void {
-    const canvas = document.getElementById("shader-canvas") as HTMLCanvasElement;
+    const canvas = document.getElementById(
+      "resumen-shader-canvas"
+    ) as HTMLCanvasElement;
     if (!canvas) return;
 
     const gl =
@@ -299,8 +276,6 @@ void main() {
     const uTime = gl.getUniformLocation(program, "u_time");
     const uRes = gl.getUniformLocation(program, "u_resolution");
 
-    const startTime = performance.now();
-
     const render = (t: number) => {
       syncSize();
       gl.viewport(0, 0, canvas.width, canvas.height);
@@ -311,7 +286,7 @@ void main() {
     };
 
     this.ngZone.runOutsideAngular(() => {
-      render(startTime);
+      render(0);
     });
   }
 }

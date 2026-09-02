@@ -74,14 +74,26 @@ export class AuthService {
       throw new AuthError("User account is not active", 403);
     }
 
-    const secret = process.env.JWT_SECRET as string;
-    const expiresIn = process.env.JWT_EXPIRES_IN || "1m";
+    const token = this.signToken(user);
 
-    const token = jwt.sign(
-      { sub: user.id, email: user.email, role: user.role },
-      secret,
-      { expiresIn } as jwt.SignOptions
-    );
+    return { token, user: toPublicUser(user) };
+  }
+
+  /**
+   * Renueva el JWT mientras el usuario sigue activo: la expiración de la
+   * sesión se mide por inactividad, no desde el momento del login.
+   */
+  async refresh(userId: number): Promise<{ token: string; user: PublicUser }> {
+    const user = await this.userRepository.findById(userId);
+    if (!user) {
+      throw new AuthError("User not found", 401);
+    }
+
+    if (user.status !== "ACTIVE") {
+      throw new AuthError("User account is not active", 403);
+    }
+
+    const token = this.signToken(user);
 
     return { token, user: toPublicUser(user) };
   }
@@ -92,5 +104,16 @@ export class AuthService {
       throw new AuthError("User not found", 404);
     }
     return toPublicUser(user);
+  }
+
+  private signToken(user: { id: number; email: string; role: string }): string {
+    const secret = process.env.JWT_SECRET as string;
+    const expiresIn = process.env.JWT_EXPIRES_IN || "2m";
+
+    return jwt.sign(
+      { sub: user.id, email: user.email, role: user.role },
+      secret,
+      { expiresIn } as jwt.SignOptions
+    );
   }
 }
