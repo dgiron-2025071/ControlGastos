@@ -27,6 +27,22 @@ export const routes: Routes = [
       ),
   },
   {
+    path: "activos",
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import("./features/activos/activos.component").then(
+        (m) => m.ActivosComponent
+      ),
+  },
+  {
+    path: "resumen",
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import("./features/resumen/resumen.component").then(
+        (m) => m.ResumenComponent
+      ),
+  },
+  {
     path: "proximamente",
     canActivate: [authGuard],
     loadComponent: () =>
